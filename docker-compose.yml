@@ -1,0 +1,120 @@
+# Ambiente local completo: 2 APIs + PostgreSQL + Redis + Prometheus + Grafana
+# Uso: make up   (ou: docker compose up -d --build)
+name: devops-project
+
+x-api-env: &api-env
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_USER: ${DB_USER:?defina DB_USER no .env}
+  DB_PASSWORD: ${DB_PASSWORD:?defina DB_PASSWORD no .env}
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+
+x-api-common: &api-common
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  init: false # a imagem já usa tini
+  networks: [backend, observability]
+
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: flash_sales
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init-databases.sql:/docker-entrypoint-initdb.d/10-init-databases.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d flash_sales"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [backend]
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [backend]
+
+  flash-sales:
+    <<: *api-common
+    build: ./apps/flash-sales
+    image: flash-sales:local
+    environment:
+      <<: *api-env
+      DB_NAME: flash_sales
+      NODE_OPTIONS: --max-old-space-size=384
+    ports: ["3000:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 512M }
+
+  contratos:
+    <<: *api-common
+    build: ./apps/contratos
+    image: contratos:local
+    environment:
+      <<: *api-env
+      DB_NAME: contracts_db
+    ports: ["3001:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 256M }
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./monitoring/prometheus.compose.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - promdata:/prometheus
+    ports: ["9090:9090"]
+    networks: [observability]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?defina GRAFANA_ADMIN_PASSWORD no .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      PROMETHEUS_URL: http://prometheus:9090
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports: ["3002:3000"]
+    depends_on: [prometheus]
+    networks: [observability]
+
+networks:
+  backend:
+  observability:
+
+volumes:
+  pgdata:
+  redisdata:
+  promdata:
+  grafanadata:

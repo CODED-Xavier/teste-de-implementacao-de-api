@@ -1,0 +1,18 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: flash-sales
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["flash-sales:3000"]
+        labels: { app: flash-sales }
+  - job_name: contratos
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["contratos:3000"]
+        labels: { app: contratos }

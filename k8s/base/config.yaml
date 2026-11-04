@@ -1,0 +1,13 @@
+# Configuração NÃO sensível, compartilhada pelas APIs.
+# Credenciais ficam no Secret "app-secrets" (criado por scripts/create-secrets.sh).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: devops-project
+data:
+  NODE_ENV: production
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"

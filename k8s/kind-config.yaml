@@ -1,0 +1,15 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: devops
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.31.0
+    extraPortMappings: # NodePort -> localhost (mesmas portas do docker-compose)
+      - { containerPort: 30000, hostPort: 3000 } # flash-sales
+      - { containerPort: 30001, hostPort: 3001 } # contratos
+      - { containerPort: 30002, hostPort: 3002 } # grafana
+      - { containerPort: 30090, hostPort: 9090 } # prometheus
+  - role: worker
+    image: kindest/node:v1.31.0
+  - role: worker
+    image: kindest/node:v1.31.0

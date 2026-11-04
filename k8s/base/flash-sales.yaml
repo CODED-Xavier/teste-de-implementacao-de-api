@@ -1,0 +1,120 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: flash-sales
+  namespace: devops-project
+  labels: { app: flash-sales }
+spec:
+  selector: { app: flash-sales }
+  ports:
+    - { name: http, port: 3000, targetPort: http }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flash-sales
+  namespace: devops-project
+  labels: { app: flash-sales }
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 } # zero downtime
+  selector:
+    matchLabels: { app: flash-sales }
+  template:
+    metadata:
+      labels: { app: flash-sales }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: /metrics
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000 # usuário "node" da imagem
+        runAsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: flash-sales }
+      containers:
+        - name: flash-sales
+          image: flash-sales # tag definida pelo overlay (kustomize images)
+          ports:
+            - { name: http, containerPort: 3000 }
+          envFrom:
+            - configMapRef: { name: app-config }
+          env:
+            - { name: DB_NAME, value: flash_sales }
+            - name: DB_USER
+              valueFrom: { secretKeyRef: { name: app-secrets, key: DB_USER } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: app-secrets, key: DB_PASSWORD } }
+            - { name: NODE_OPTIONS, value: "--max-old-space-size=384" }
+          # Startup: dá tempo para conectar ao banco antes de liveness/readiness começarem.
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+          # Readiness: só recebe tráfego se Postgres e Redis estiverem OK.
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # Liveness: reinicia se o processo travar (tolerante a picos de event loop bloqueado).
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: flash-sales
+  namespace: devops-project
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: flash-sales }
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 60 }
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - { type: Pods, value: 2, periodSeconds: 30 }
+    scaleDown:
+      stabilizationWindowSeconds: 120
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: flash-sales
+  namespace: devops-project
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: flash-sales }

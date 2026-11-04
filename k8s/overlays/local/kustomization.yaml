@@ -1,0 +1,28 @@
+# Overlay para cluster local (kind): imagens "local" carregadas no cluster
+# e Services expostos via NodePort (mapeados para o host em k8s/kind-config.yaml).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+
+images:
+  - { name: flash-sales, newName: flash-sales, newTag: local }
+  - { name: contratos, newName: contratos, newTag: local }
+
+patches:
+  - target: { kind: Service, name: flash-sales }
+    patch: |-
+      - { op: add, path: /spec/type, value: NodePort }
+      - { op: add, path: /spec/ports/0/nodePort, value: 30000 }
+  - target: { kind: Service, name: contratos }
+    patch: |-
+      - { op: add, path: /spec/type, value: NodePort }
+      - { op: add, path: /spec/ports/0/nodePort, value: 30001 }
+  - target: { kind: Service, name: grafana }
+    patch: |-
+      - { op: add, path: /spec/type, value: NodePort }
+      - { op: add, path: /spec/ports/0/nodePort, value: 30002 }
+  - target: { kind: Service, name: prometheus }
+    patch: |-
+      - { op: add, path: /spec/type, value: NodePort }
+      - { op: add, path: /spec/ports/0/nodePort, value: 30090 }

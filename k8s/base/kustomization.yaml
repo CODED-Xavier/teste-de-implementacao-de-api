@@ -1,0 +1,36 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: devops-project
+
+resources:
+  - namespace.yaml
+  - config.yaml
+  - postgres.yaml
+  - redis.yaml
+  - flash-sales.yaml
+  - contratos.yaml
+  - monitoring.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: devops-project
+
+# ConfigMaps gerados a partir dos MESMOS arquivos usados no docker-compose
+# (fonte única da verdade). Requer: --load-restrictor=LoadRestrictionsNone
+configMapGenerator:
+  - name: postgres-init
+    files:
+      - 10-init-databases.sql=../../db/init-databases.sql
+  - name: prometheus-config
+    files:
+      - prometheus.yml=../../monitoring/prometheus.k8s.yml
+      - alerts.yml=../../monitoring/alerts.yml
+  - name: grafana-datasources
+    files:
+      - prometheus.yml=../../monitoring/grafana/provisioning/datasources/prometheus.yml
+  - name: grafana-dashboard-provider
+    files:
+      - dashboards.yml=../../monitoring/grafana/provisioning/dashboards/dashboards.yml
+  - name: grafana-dashboards
+    files:
+      - api-overview.json=../../monitoring/grafana/dashboards/api-overview.json

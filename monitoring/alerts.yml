@@ -1,0 +1,40 @@
+groups:
+  - name: api-slo
+    rules:
+      - alert: InstanciaIndisponivel
+        expr: up == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.app }} ({{ $labels.instance }}) não responde ao scrape"
+
+      - alert: TaxaDeErros5xxAlta
+        expr: |
+          sum by (app) (rate(http_request_duration_ms_count{status_code=~"5.."}[2m]))
+            / sum by (app) (rate(http_request_duration_ms_count[2m])) > 0.05
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.app }}: mais de 5% das requisições retornam 5xx"
+
+      - alert: LatenciaP95Alta
+        expr: |
+          histogram_quantile(0.95, sum by (app, le) (rate(http_request_duration_ms_bucket[2m]))) > 1000
+        for: 3m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.app }}: p95 acima de 1s"
+
+      - alert: EventLoopBloqueado
+        expr: nodejs_eventloop_lag_p99_seconds > 0.5
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.app }} ({{ $labels.pod }}{{ $labels.instance }}): event loop com lag p99 > 500ms (ex.: /tickets/export)"
+
+      - alert: MemoriaAlta
+        expr: process_resident_memory_bytes > 400 * 1024 * 1024
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.app }}: uso de memória > 400MiB (limite do container: 512MiB)"

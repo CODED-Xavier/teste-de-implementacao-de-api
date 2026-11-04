@@ -1,0 +1,145 @@
+# ---------------- Prometheus ----------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: devops-project
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role # menor privilégio: só leitura de pods, só neste namespace
+metadata:
+  name: prometheus
+  namespace: devops-project
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: prometheus
+  namespace: devops-project
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: prometheus }
+subjects:
+  - { kind: ServiceAccount, name: prometheus, namespace: devops-project }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: devops-project
+spec:
+  selector: { app: prometheus }
+  ports:
+    - { name: http, port: 9090, targetPort: 9090 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: devops-project
+  labels: { app: prometheus }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: prometheus }
+  template:
+    metadata:
+      labels: { app: prometheus }
+    spec:
+      serviceAccountName: prometheus
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.54.1
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=24h
+          ports:
+            - { name: http, containerPort: 9090 }
+          readinessProbe:
+            httpGet: { path: /-/ready, port: http }
+          livenessProbe:
+            httpGet: { path: /-/healthy, port: http }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: config, mountPath: /etc/prometheus, readOnly: true }
+            - { name: data, mountPath: /prometheus }
+      volumes:
+        - name: config
+          configMap: { name: prometheus-config }
+        - name: data
+          emptyDir: {}
+---
+# ---------------- Grafana ----------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: devops-project
+spec:
+  selector: { app: grafana }
+  ports:
+    - { name: http, port: 3000, targetPort: 3000 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: devops-project
+  labels: { app: grafana }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: grafana }
+  template:
+    metadata:
+      labels: { app: grafana }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        fsGroup: 472
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.2.0
+          ports:
+            - { name: http, containerPort: 3000 }
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom: { secretKeyRef: { name: app-secrets, key: GRAFANA_ADMIN_USER } }
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: app-secrets, key: GRAFANA_ADMIN_PASSWORD } }
+            - { name: GF_USERS_ALLOW_SIGN_UP, value: "false" }
+            - { name: PROMETHEUS_URL, value: "http://prometheus:9090" }
+          readinessProbe:
+            httpGet: { path: /api/health, port: http }
+          livenessProbe:
+            httpGet: { path: /api/health, port: http }
+            initialDelaySeconds: 30
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 384Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: datasources, mountPath: /etc/grafana/provisioning/datasources, readOnly: true }
+            - { name: dashboard-provider, mountPath: /etc/grafana/provisioning/dashboards, readOnly: true }
+            - { name: dashboards, mountPath: /var/lib/grafana/dashboards, readOnly: true }
+            - { name: data, mountPath: /var/lib/grafana }
+      volumes:
+        - { name: datasources, configMap: { name: grafana-datasources } }
+        - { name: dashboard-provider, configMap: { name: grafana-dashboard-provider } }
+        - { name: dashboards, configMap: { name: grafana-dashboards } }
+        - { name: data, emptyDir: {} }
